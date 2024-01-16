@@ -6,7 +6,6 @@ from odoo.addons.component.core import Component
 
 
 class EDIStorageSendComponent(Component):
-
     _name = "edi.storage.component.send"
     _inherit = [
         "edi.component.send.mixin",
