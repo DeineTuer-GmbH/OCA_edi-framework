@@ -8,6 +8,8 @@ import os
 
 from odoo import fields, models
 
+from .. import utils
+
 _logger = logging.getLogger(__name__)
 
 
@@ -70,7 +72,7 @@ class EDIBackend(models.Model):
         res = super()._component_match_attrs(exchange_record, key)
         if not self.storage_id or key not in self._storage_actions:
             return res
-        res["storage_type"] = self.storage_id.protocol
+        res["storage_type"] = self.sudo().storage_id.protocol
         return res
 
     def _component_sort_key(self, component_class):
@@ -136,7 +138,8 @@ class EDIBackend(models.Model):
         if existing:
             return
         record = self.create_record(
-            exchange_type.code, self._storage_new_exchange_record_vals(file_name)
+            exchange_type.code,
+            self._storage_new_exchange_record_vals(file_name),
         )
         _logger.debug("%s: new exchange record generated.", self.name)
         return record.identifier
@@ -147,10 +150,9 @@ class EDIBackend(models.Model):
         ).as_posix()
         if not exchange_type.exchange_filename_pattern:
             # If there is not pattern, return everything
-            # TODO: clean this up, .list_files is deprecated in fs_storage
             filenames = [
                 x
-                for x in self.storage_id.list_files(full_input_dir_pending)
+                for x in utils.list_files(self.storage_id, full_input_dir_pending)
                 if x.strip("/")
             ]
             return filenames
@@ -159,10 +161,14 @@ class EDIBackend(models.Model):
         if exchange_type.exchange_file_ext:
             bits.append(r"\." + exchange_type.exchange_file_ext)
         pattern = "".join(bits)
-        # TODO: clean this up, .find_files is deprecated in fs_storage
-        full_paths = self.storage_id.find_files(pattern, full_input_dir_pending)
-        pending_path_len = len(full_input_dir_pending)
-        return [p[pending_path_len:].strip("/") for p in full_paths]
+        relative_paths = utils.find_files(
+            self.storage_id, pattern, full_input_dir_pending
+        )
+        return [p.strip("/") for p in relative_paths]
 
     def _storage_new_exchange_record_vals(self, file_name):
-        return {"exchange_filename": file_name, "edi_exchange_state": "input_pending"}
+        return {
+            "exchange_filename": file_name,
+            "edi_exchange_state": "input_pending",
+            "storage_id": self.storage_id.id,
+        }

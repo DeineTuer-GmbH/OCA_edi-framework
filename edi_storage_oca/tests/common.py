@@ -6,7 +6,7 @@ from unittest import mock
 
 from odoo.addons.edi_oca.tests.common import EDIBackendCommonComponentTestCase
 
-FS_STORAGE_MOCK_PATH = "odoo.addons.fs_storage.models.fs_storage.FSStorage"
+FS_STORAGE_MOCK_PATH = "odoo.addons.edi_storage_oca.utils"
 
 
 class TestEDIStorageBase(EDIBackendCommonComponentTestCase):
@@ -84,17 +84,17 @@ class TestEDIStorageBase(EDIBackendCommonComponentTestCase):
             fname += ".error"
         return checker._get_remote_file_path(state, filename=fname).as_posix()
 
-    def _mocked_backend_get(self, mocked_paths, path, **kwargs):
+    def _mocked_backend_get(self, mocked_paths, storage, path, **kwargs):
         self._fs_storage_calls.append(path)
         if mocked_paths.get(path):
             with open(mocked_paths.get(path), "rb") as remote_file:
                 return remote_file.read()
         raise FileNotFoundError()
 
-    def _mocked_backend_add(self, path, data, **kwargs):
+    def _mocked_backend_add(self, storage, path, data, **kwargs):
         self._fs_storage_calls.append(path)
 
-    def _mocked_backend_list_files(self, mocked_paths, path, **kwargs):
+    def _mocked_backend_list_files(self, mocked_paths, storage, path, **kwargs):
         files = []
         path_length = len(path)
         for p in mocked_paths.keys():
@@ -104,10 +104,10 @@ class TestEDIStorageBase(EDIBackendCommonComponentTestCase):
 
     def _mock_fs_storage_get(self, mocked_paths):
         mocked = functools.partial(self._mocked_backend_get, mocked_paths)
-        return mock.patch(FS_STORAGE_MOCK_PATH + ".get", mocked)
+        return mock.patch(FS_STORAGE_MOCK_PATH + ".get_file", mocked)
 
     def _mock_fs_storage_add(self):
-        return mock.patch(FS_STORAGE_MOCK_PATH + ".add", self._mocked_backend_add)
+        return mock.patch(FS_STORAGE_MOCK_PATH + ".add_file", self._mocked_backend_add)
 
     def _mock_fs_storage_list_files(self, mocked_paths):
         mocked = functools.partial(self._mocked_backend_list_files, mocked_paths)
@@ -143,7 +143,7 @@ class TestEDIStorageBase(EDIBackendCommonComponentTestCase):
                 lambda x: "edi-exchange" in x.body
             )
             self.assertEqual(len(messages), len(expected_messages))
-            for msg_rec, expected in zip(messages, expected_messages, strict=True):
+            for msg_rec, expected in zip(messages, expected_messages, strict=False):
                 self.assertIn(expected["message"], msg_rec.body)
                 self.assertIn("level-" + expected["level"], msg_rec.body)
         # TODO: test content of file sent

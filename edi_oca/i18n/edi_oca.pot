@@ -799,13 +799,8 @@ msgstr ""
 #. module: edi_oca
 #: model:ir.model.fields,help:edi_oca.field_edi_exchange_type__exchange_filename_pattern
 msgid ""
-"For output exchange types this should be a formatting string with the following variables available (to be used between brackets, `{}`): `exchange_record`, `record_name`, `type`, `dt` and `seq`. For instance, a valid string would be {record_name}-{type.code}-{dt}-{seq}\n"
-"For more information:\n"
-"- `exchange_record` means exchange record\n"
-"- `record_name` means name of the exchange record\n"
-"- `type` means code of the exchange record type\n"
-"- `dt` means datetime\n"
-"- `seq` means sequence. You need a sequence to be defined in `Exchange Filename Sequence` to use `seq`\n"
+"For output exchange types this should be a formatting string with the following variables available (to be used between brackets, `{}`): `exchange_record`, `record_name`, `type` and `dt`. For instance, a valid string would be {record_name}-{type.code}-{dt}\n"
+"For input exchange types related to storage backends it should be a regex expression to filter the files to be fetched from the pending directory in the related storage. E.g: `.*my-type-[0-9]*.\\.csv`"
 msgstr ""
 
 #. module: edi_oca
@@ -1085,6 +1080,11 @@ msgstr ""
 #: model:ir.model.fields.selection,name:edi_oca.selection__edi_exchange_type__encoding_in_error_handler__strict
 #: model:ir.model.fields.selection,name:edi_oca.selection__edi_exchange_type__encoding_out_error_handler__strict
 msgid "Raise Error"
+msgstr ""
+
+#. module: edi_oca
+#: model:ir.model.fields,field_description:edi_oca.field_edi_exchange_record__rating_ids
+msgid "Ratings"
 msgstr ""
 
 #. module: edi_oca
