@@ -25,18 +25,30 @@ class OrderMixin:
         return model.create(so_vals)
 
     @classmethod
+    def _create_product(cls, **kw):
+        """Create a product"""
+        product_model = cls.env["product.product"]
+        vals = {
+            "name": "Test product",
+            "standard_price": 500.0,
+            "weight": 0.01,
+        }
+        vals.update(kw)
+        return product_model.create(vals)
+
+    @classmethod
     def _setup_order(cls, **kw):
-        cls.product_a = cls.env.ref("product.product_product_4")
-        cls.product_a.barcode = "1" * 14
-        cls.product_b = cls.env.ref("product.product_product_4b")
-        cls.product_b.barcode = "2" * 14
-        cls.product_c = cls.env.ref("product.product_product_4c")
-        cls.product_c.barcode = "3" * 14
-        cls.product_d = cls.env.ref("product.product_product_5")
-        cls.product_d.barcode = "4" * 14
+        cls.product_a = cls._create_product(default_code="FURN_0096", barcode="1" * 14)
+        cls.product_b = cls._create_product(default_code="FURN_0097", barcode="2" * 14)
+        cls.product_c = cls._create_product(default_code="FURN_0098", barcode="3" * 14)
+        cls.product_d = cls._create_product(
+            default_code="E-COM06", barcode="4" * 14, type="consu"
+        )
         line_defaults = kw.pop("line_defaults", {})
         vals = {
-            "partner_id": cls.env.ref("base.res_partner_10").id,
+            "partner_id": cls.env["res.partner"]
+            .create({"name": "The Jackson Group"})
+            .id,
             "commitment_date": "2022-07-29",
         }
         vals.update(kw)

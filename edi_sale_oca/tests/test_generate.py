@@ -27,18 +27,59 @@ class TestProcessComponent(TransactionComponentRegistryCase, EDIBackendTestMixin
         super().setUpClass()
         cls._setup_registry(cls)
         cls._setup_env()
-        cls.backend = cls._get_backend()
-        cls.exc_type = cls.env.ref("edi_sale_oca.demo_edi_exc_type_order_out")
+        cls.exc_type = cls._create_exchange_type(
+            name="Demo Sale Order Response",
+            code="demo_SaleOrder_out",
+            direction="output",
+            exchange_filename_pattern="{record_name}-{type.code}-{dt}",
+            exchange_file_ext="xml",
+        )
         model = cls.env.ref("edi_component_oca.model_edi_oca_component_handler")
         cls.exc_type.generate_model_id = model
         cls.exc_type.send_model_id = model
         cls.exc_type.process_model_id = model
         cls.exc_type.receive_model_id = model
-        cls.edi_conf_confirmed = cls.env.ref(
-            "edi_sale_oca.demo_edi_configuration_confirmed"
+        cls.edi_conf_confirmed = cls.edi_configuration.create(
+            {
+                "name": "Demo Sale OrderResponse - order confirmed",
+                "backend_id": cls.backend.id,
+                "type_id": cls.exc_type.id,
+                "trigger_id": cls.env.ref(
+                    "edi_sale_oca.edi_conf_trigger_sale_order_state_change"
+                ).id,
+                "model_id": cls.env["ir.model"]._get_id("sale.model_sale_order"),
+                "snippet_do": """
+                    # STATES
+                    # ('draft', "Quotation"),
+                    # ('sent', "Quotation Sent"),
+                    # ('sale', "Sales Order"),
+                    # ('cancel', "Cancelled"),
+                    if record.state == 'sale':
+                      record._edi_send_via_edi(conf.type_id)
+                """,
+            }
         )
-        cls.edi_conf_done = cls.env.ref("edi_sale_oca.demo_edi_configuration_done")
-        cls.partner = cls.env.ref("base.res_partner_2").copy({"name": "John Doe"})
+        cls.edi_conf_done = cls.edi_configuration.create(
+            {
+                "name": "Demo Sale OrderResponse - order done",
+                "backend_id": cls.backend.id,
+                "type_id": cls.exc_type.id,
+                "trigger_id": cls.env.ref(
+                    "edi_sale_oca.edi_conf_trigger_sale_order_state_change"
+                ).id,
+                "model_id": cls.env["ir.model"]._get_id("sale.model_sale_order"),
+                "snippet_do": """
+                    if record.state in ('done', 'cancel'):
+                      record._edi_send_via_edi(conf.type_id)
+                """,
+            }
+        )
+        cls.partner = cls.env["res.partner"].create(
+            {
+                "name": "John Doe",
+                "is_company": True,
+            }
+        )
         cls._load_module_components(cls, "edi_core_oca")
         cls._load_module_components(cls, "edi_sale_oca")
         cls._build_components(
@@ -51,10 +92,6 @@ class TestProcessComponent(TransactionComponentRegistryCase, EDIBackendTestMixin
         super().setUp()
         Generator.reset_faked()
         Sender.reset_faked()
-
-    @classmethod
-    def _get_backend(cls):
-        return cls.env.ref("edi_sale_oca.demo_edi_backend")
 
     def test_lookup(self):
         # Just ensuring test setup is done properly
