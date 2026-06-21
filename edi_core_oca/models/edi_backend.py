@@ -64,6 +64,18 @@ class EDIBackend(models.Model):
     )
     active = fields.Boolean(default=True)
     company_id = fields.Many2one("res.company", string="Company")
+    auto_archive_records_after_days = fields.Integer(
+        string="Auto-archive records after (days)",
+        default=0,
+        help="Automatically archive EDI exchange records after X days. "
+        "Set to <= 0 to disable auto-archiving.",
+    )
+    auto_delete_records_after_days = fields.Integer(
+        string="Auto-delete archived records after (days)",
+        default=0,
+        help="Automatically delete archived EDI exchange records after X days. "
+        "Set to <= 0 to disable auto-deletion.",
+    )
 
     @property
     def exchange_record_model(self):
@@ -109,6 +121,7 @@ class EDIBackend(models.Model):
         :param kw: keyword args to be propagated to output generate handler
         """
         self.ensure_one()
+        old_state = exchange_record.edi_exchange_state
         if force and exchange_record.exchange_file:
             # Remove file to regenerate
             exchange_record.exchange_file = False
@@ -136,7 +149,6 @@ class EDIBackend(models.Model):
                 traceback = _get_exception_traceback()
                 error = _get_exception_msg(err)
                 state = "validate_error"
-                message = exchange_record._exchange_status_message("validate_ko")
                 exchange_record.update(
                     {
                         "edi_exchange_state": state,
@@ -144,6 +156,15 @@ class EDIBackend(models.Model):
                         "exchange_error_traceback": traceback,
                     }
                 )
+                if old_state != state:
+                    exchange_record._notify_error("validate_ko")
+                # At this point `message` still holds the "generate_ok" success
+                # text set before validation ran. Generation succeeded but
+                # validation failed, so clear it: `_notify_error` has already
+                # posted the validation error (and fired the error event), and
+                # we must not let `notify_action_complete` below post the stale
+                # success message on top of it.
+                message = None
         exchange_record.notify_action_complete("generate", message=message)
         return message
 
@@ -216,7 +237,7 @@ class EDIBackend(models.Model):
         check = self._output_check_send(exchange_record)
         if not check:
             return self._failed_output_check_send_msg()
-        state = exchange_record.edi_exchange_state
+        old_state = state = exchange_record.edi_exchange_state
         error = traceback = False
         message = None
         res = ""
@@ -236,7 +257,6 @@ class EDIBackend(models.Model):
             traceback = _get_exception_traceback()
             error = _get_exception_msg(err)
             state = "output_error_on_send"
-            message = exchange_record._exchange_status_message("send_ko")
             res = f"Error: {error}"
             _logger.debug(
                 "%s send failed. Marked as errored.", exchange_record.identifier
@@ -269,6 +289,8 @@ class EDIBackend(models.Model):
                         "exchanged_on": fields.Datetime.now(),
                     }
                 )
+                if old_state != state and state == "output_error_on_send":
+                    exchange_record._notify_error("send_ko")
         exchange_record.notify_action_complete("send", message=message)
         return res
 
@@ -384,6 +406,15 @@ class EDIBackend(models.Model):
         ]
         if record_ids:
             domain.append(("id", "in", record_ids))
+        # By default, it's pointless to consider records with quick_exec
+        # because they will be executed right away when created.
+        domain.append(
+            (
+                "type_id.quick_exec",
+                "=",
+                self.env.context.get("edi__quick_exec", False),
+            )
+        )
         return domain
 
     def _output_pending_records_domain(self, skip_sent=True, record_ids=None):
@@ -439,6 +470,7 @@ class EDIBackend(models.Model):
         old_state = state = exchange_record.edi_exchange_state
         error = traceback = False
         message = None
+        res = None
         try:
             res = self._exchange_process(exchange_record)
         except self._swallable_exceptions() as err:
@@ -492,10 +524,10 @@ class EDIBackend(models.Model):
         check = self._exchange_receive_check(exchange_record)
         if not check:
             return "Nothing to do. Likely already received."
-        state = exchange_record.edi_exchange_state
+        old_state = state = exchange_record.edi_exchange_state
         error = traceback = False
         message = None
-        content = None
+        res = None
         try:
             content = self._exchange_receive(exchange_record)
             # Ignore result of FileNotFoundError/OSError
@@ -506,7 +538,6 @@ class EDIBackend(models.Model):
             traceback = _get_exception_traceback()
             error = _get_exception_msg(err)
             state = "validate_error"
-            message = exchange_record._exchange_status_message("validate_ko")
             res = f"Validation error: {error}"
         except self._swallable_exceptions() as err:
             if self.env.context.get("_edi_receive_break_on_error"):
@@ -514,7 +545,6 @@ class EDIBackend(models.Model):
             traceback = _get_exception_traceback()
             error = _get_exception_msg(err)
             state = "input_receive_error"
-            message = exchange_record._exchange_status_message("receive_ko")
             res = f"Input error: {error}"
         except (OperationalError, IntegrityError):
             # We don't want the finally block to be executed in this case as
@@ -539,6 +569,10 @@ class EDIBackend(models.Model):
                         "exchanged_on": fields.Datetime.now(),
                     }
                 )
+                if old_state != state and state == "input_receive_error":
+                    exchange_record._notify_error("receive_ko")
+                if old_state != state and state == "validate_error":
+                    exchange_record._notify_error("validate_ko")
         exchange_record.notify_action_complete("receive", message=message)
         return res
 

@@ -1,34 +1,38 @@
 # Copyright 2026 Camptocamp SA
+# @author Simone Orsi <simone.orsi@camptocamp.com>
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
-from odoo.addons.component.tests.common import TransactionComponentRegistryCase
-from odoo.addons.edi_component_oca.tests.fake_components import (
-    FakeOutputGenerator,
-    FakeOutputSender,
-)
+from odoo.tests.common import TransactionCase
 
 from .common import OrderMixin, PurchaseEDIBackendTestMixin
 
 
-class Generator(FakeOutputGenerator):
-    _backend_type = "purchase_demo"
-    _exchange_type = "demo_PurchaseOrder_out"
+class TestGenerateViaConf(TransactionCase, PurchaseEDIBackendTestMixin, OrderMixin):
+    """Verify that purchase EDI generation is driven by ``edi.configuration``.
 
+    No component / no fake handler: we simply assert that the snippets bound
+    to the partner via ``partner_id.edi_purchase_conf_ids`` are executed by
+    the state-change event dispatched by ``edi.exchange.consumer.mixin``.
 
-class Sender(FakeOutputSender):
-    _backend_type = "purchase_demo"
-    _exchange_type = "demo_PurchaseOrder_out"
+    Each snippet writes a marker on ``conf.description`` so we can verify
+    which configurations actually ran.
+    """
 
+    # Snippet writes the order's state on the conf description if it matches
+    # the expected target state.
+    _snippet_tpl = (
+        "if record.state == '{state}':\n"
+        "    conf.write({{'description': "
+        "(conf.description or '') + '|' + record.state}})"
+    )
 
-class TestProcessComponent(
-    TransactionComponentRegistryCase, PurchaseEDIBackendTestMixin, OrderMixin
-):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._setup_registry(cls)
+        cls.env = cls.env(context=dict(cls.env.context, tracking_disable=True))
         cls._setup_env()
         cls._setup_records()
+
         cls.exc_type = cls._create_exchange_type(
             name="Demo Purchase Order out",
             code="demo_PurchaseOrder_out",
@@ -36,24 +40,18 @@ class TestProcessComponent(
             exchange_filename_pattern="{record_name}-{type.code}-{dt}",
             exchange_file_ext="xml",
         )
-        model = cls.env.ref("edi_component_oca.model_edi_oca_component_handler")
-        cls.exc_type.generate_model_id = model
-        cls.exc_type.send_model_id = model
-        cls.exc_type.process_model_id = model
-        cls.exc_type.receive_model_id = model
+        cls.state_change_trigger = cls.env.ref(
+            "edi_purchase_oca.edi_conf_trigger_purchase_order_state_change"
+        )
+        purchase_model_id = cls.env["ir.model"]._get_id("purchase.order")
         cls.edi_conf_confirmed = cls.env["edi.configuration"].create(
             {
                 "name": "Demo Purchase Order - order confirmed",
                 "type_id": cls.exc_type.id,
                 "backend_id": cls.backend.id,
-                "model_id": cls.env["ir.model"]._get_id("purchase.order"),
-                "trigger_id": cls.env.ref(
-                    "edi_purchase_oca.edi_conf_trigger_purchase_order_state_change"
-                ).id,
-                "snippet_do": (
-                    "if record.state == 'purchase':\n"
-                    "  record._edi_send_via_edi(conf.type_id)"
-                ),
+                "model_id": purchase_model_id,
+                "trigger_id": cls.state_change_trigger.id,
+                "snippet_do": cls._snippet_tpl.format(state="purchase"),
             }
         )
         cls.edi_conf_cancelled = cls.env["edi.configuration"].create(
@@ -61,66 +59,39 @@ class TestProcessComponent(
                 "name": "Demo Purchase Order - order cancelled",
                 "type_id": cls.exc_type.id,
                 "backend_id": cls.backend.id,
-                "model_id": cls.env["ir.model"]._get_id("purchase.order"),
-                "trigger_id": cls.env.ref(
-                    "edi_purchase_oca.edi_conf_trigger_purchase_order_state_change"
-                ).id,
-                "snippet_do": (
-                    "if record.state == 'cancel':\n"
-                    "  record._edi_send_via_edi(conf.type_id)"
-                ),
+                "model_id": purchase_model_id,
+                "trigger_id": cls.state_change_trigger.id,
+                "snippet_do": cls._snippet_tpl.format(state="cancel"),
             }
         )
-        cls._setup_order()
-        cls._load_module_components(cls, "edi_core_oca")
-        cls._load_module_components(cls, "edi_purchase_oca")
-        cls._build_components(
-            cls,
-            Generator,
-            Sender,
-        )
-
-    def setUp(self):
-        super().setUp()
-        Generator.reset_faked()
-        Sender.reset_faked()
-
-    def test_lookup(self):
-        record = self.backend.create_record(self.exc_type.code, {})
-        comp = self.backend._get_component(record, "generate")
-        self.assertEqual(comp._name, Generator._name)
-        comp = self.backend._get_component(record, "send")
-        self.assertEqual(comp._name, Sender._name)
+        cls._setup_order_records()
 
     def test_new_order_no_conf_no_output(self):
+        # No conf linked to the vendor -> no snippet executed.
         order = self._create_purchase_order()
         order.button_confirm()
-        self.assertFalse(order.exchange_record_ids)
+        self.assertFalse(self.edi_conf_confirmed.description)
+        self.assertFalse(self.edi_conf_cancelled.description)
 
     def test_new_order_1conf_output(self):
         self.vendor.edi_purchase_conf_ids = self.edi_conf_confirmed
         order = self._create_purchase_order()
-        self.assertFalse(order.exchange_record_ids)
-        order.with_context(fake_output="ORDER CONFIRM").button_confirm()
-        self.assertEqual(len(order.exchange_record_ids), 1)
-        record = order.exchange_record_ids[0]
-        self.assertEqual(record._get_file_content(), "ORDER CONFIRM")
-        self.assertEqual(record.type_id, self.exc_type)
+        self.assertFalse(self.edi_conf_confirmed.description)
+        order.button_confirm()
+        self.assertEqual(self.edi_conf_confirmed.description, "|purchase")
+        # The cancelled conf is not even attached to the vendor.
+        self.assertFalse(self.edi_conf_cancelled.description)
 
     def test_new_order_2conf_output(self):
         self.vendor.edi_purchase_conf_ids = (
             self.edi_conf_confirmed | self.edi_conf_cancelled
         )
         order = self._create_purchase_order()
-        self.assertFalse(order.exchange_record_ids)
-        order.with_context(fake_output="ORDER CONFIRM").button_confirm()
-        self.assertEqual(len(order.exchange_record_ids), 1)
-        record = order.exchange_record_ids[0]
-        self.assertEqual(record._get_file_content(), "ORDER CONFIRM")
-        self.assertEqual(record.type_id, self.exc_type)
-        order.with_context(fake_output="ORDER CANCEL").button_cancel()
-        record1, record2 = order.exchange_record_ids
-        self.assertEqual(record1.type_id, self.exc_type)
-        self.assertEqual(record1._get_file_content(), "ORDER CONFIRM")
-        self.assertEqual(record2.type_id, self.exc_type)
-        self.assertEqual(record2._get_file_content(), "ORDER CANCEL")
+        # Confirm -> only the "confirmed" snippet matches
+        order.button_confirm()
+        self.assertEqual(self.edi_conf_confirmed.description, "|purchase")
+        self.assertFalse(self.edi_conf_cancelled.description)
+        # Cancel -> the "cancelled" snippet matches
+        order.button_cancel()
+        self.assertEqual(self.edi_conf_confirmed.description, "|purchase")
+        self.assertEqual(self.edi_conf_cancelled.description, "|cancel")

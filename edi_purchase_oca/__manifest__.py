@@ -6,7 +6,6 @@
     "summary": """
         Define EDI Configuration for Purchase Orders""",
     "version": "19.0.1.0.0",
-    "development_status": "Beta",
     "license": "LGPL-3",
     "author": "ForgeFlow, Camptocamp, Odoo Community Association (OCA)",
     "website": "https://github.com/OCA/edi-framework",
@@ -14,7 +13,6 @@
         "purchase",
         "edi_core_oca",
         "edi_record_metadata_oca",
-        "edi_component_oca",
     ],
     "data": [
         # Data

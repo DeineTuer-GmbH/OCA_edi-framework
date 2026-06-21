@@ -111,11 +111,11 @@ class EDIExchangeTypeTestCase(EDIBackendCommonTestCase):
         # Test with datetime in filename pattern
         self.exchange_type_out.exchange_file_ext = "csv"
         self.exchange_type_out.exchange_filename_pattern = "Test-File-{dt}"
-        self._test_exchange_filename("Test-File-2022-04-28-083724.csv")
+        self._test_exchange_filename("Test-File-2022-04-28-08-37-24.csv")
 
         # Add timezone on current user
         self.env.user.tz = "America/New_York"  # New_York time is -4h
-        self._test_exchange_filename("Test-File-2022-04-28-043724.csv")
+        self._test_exchange_filename("Test-File-2022-04-28-04-37-24.csv")
 
         # Force date pattern on advanced settings
         self.exchange_type_out.advanced_settings_edit = """
@@ -130,7 +130,7 @@ class EDIExchangeTypeTestCase(EDIBackendCommonTestCase):
             # Rome time is +2h
             force_tz: Europe/Rome
         """
-        self._test_exchange_filename("Test-File-2022-04-28-103724.csv")
+        self._test_exchange_filename("Test-File-2022-04-28-10-37-24.csv")
 
         # Force date pattern and timezone on advanced settings
         self.exchange_type_out.advanced_settings_edit = """
@@ -167,3 +167,40 @@ class EDIExchangeTypeTestCase(EDIBackendCommonTestCase):
         rule2.invalidate_recordset()
         self.assertFalse(rule1.active)
         self.assertFalse(rule2.active)
+
+    def _create_exchange_record(self, exc_type):
+        return self.backend.create_record(
+            exc_type.code,
+            {"model": self.partner._name, "res_id": self.partner.id},
+        )
+
+    def test_exchange_record_count(self):
+        exc_type = self.exchange_type_out
+        self.assertEqual(exc_type.exchange_record_count, 0)
+        rec1 = self._create_exchange_record(exc_type)
+        rec2 = self._create_exchange_record(exc_type)
+        # Record on a different type must not be counted
+        self._create_exchange_record(self.exchange_type_in)
+        self.assertEqual(exc_type.exchange_record_count, 2)
+        self.assertEqual(set(exc_type.exchange_record_ids.ids), {rec1.id, rec2.id})
+
+    def test_action_view_exchange_records(self):
+        exc_type = self.exchange_type_out
+        rec = self._create_exchange_record(exc_type)
+        action = exc_type.action_view_exchange_records()
+        self.assertEqual(action["type"], "ir.actions.act_window")
+        self.assertEqual(action["res_model"], "edi.exchange.record")
+        self.assertIn(("type_id", "=", exc_type.id), action["domain"])
+        ctx = action["context"]
+        self.assertEqual(ctx.get("default_type_id"), exc_type.id)
+        self.assertEqual(ctx.get("default_backend_id"), exc_type.backend_id.id)
+        self.assertEqual(ctx.get("search_default_type_id"), exc_type.id)
+        # The action's domain must actually match the created exchange record
+        records = self.env[action["res_model"]].search(action["domain"])
+        self.assertIn(rec, records)
+
+    def test_action_view_exchange_records_requires_singleton(self):
+        with self.assertRaises(ValueError):
+            (
+                self.exchange_type_out | self.exchange_type_in
+            ).action_view_exchange_records()
