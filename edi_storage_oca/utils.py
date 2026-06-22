@@ -2,8 +2,10 @@
 # License LGPL-3.0 or later (http://www.gnu.org/licenses/lgpl)
 
 import base64
+import functools
 import os
 import re
+from pathlib import PurePath
 
 
 def add_file(storage, path, filedata, binary=False):
@@ -48,6 +50,8 @@ def list_files(storage, relative_path="", pattern=False):
     if pattern:
         relative_path = fs.sep.join([relative_path, pattern])
         return fs.glob(relative_path)
+    if fs.protocol == "ftp" and fs.ftp:
+        return fs.ftp.nlst(relative_path)
     return fs.ls(relative_path, detail=False)
 
 
@@ -58,3 +62,13 @@ def move_files(storage, files, destination_path, **kw):
             storage.fs.sep.join([destination_path, os.path.basename(file_path)]),
             **kw,
         )
+
+
+# TODO: drop this helper once https://github.com/OCA/storage/pull/606 is merged.
+def move_file(storage, from_dir_str, to_dir_str, filename):
+    src = (PurePath(from_dir_str) / filename).as_posix()
+    if not storage.fs.exists(src):
+        return False
+    dst = (PurePath(to_dir_str) / filename).as_posix()
+    storage.env.cr.postcommit.add(functools.partial(storage.fs.move, src, dst))
+    return True
