@@ -139,7 +139,7 @@ class EDIExchangeTemplateMixin(models.AbstractModel):
         if not self._code_snippet_valued():
             return {}
         eval_ctx = dict(render_values, **self._get_code_snippet_eval_context())
-        safe_eval.safe_eval(self.code_snippet, context=eval_ctx, mode="exec")
+        safe_eval.safe_eval(self.code_snippet, eval_ctx, mode="exec")
         result = eval_ctx.get("result", {})
         if not isinstance(result, dict):
             _logger.error("code_snippet should return a dict into `result`")
